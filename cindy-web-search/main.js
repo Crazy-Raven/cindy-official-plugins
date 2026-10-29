@@ -19,6 +19,11 @@
 var BRAVE_URL = 'https://api.search.brave.com/res/v1/web/search';
 var TAVILY_URL = 'https://api.tavily.com/search';
 var DEEPSEEK_URL = 'https://api.deepseek.com/v1/tools/search';
+var TAVILY_EXTRACT_URL = 'https://api.tavily.com/extract';
+var FETCH_PAGE_MAX_URL_CHARS = 2048;
+var FETCH_PAGE_MAX_CONTENT_CHARS = 50000;
+var FETCH_PAGE_MAX_RESPONSE_CHARS = 1000000;
+var FETCH_PAGE_HOST_TIMEOUT_MS = 55000;
 
 /*
  * 运行时文案只跟随宿主语言(cindy.request app-context / host-context-changed),
@@ -44,6 +49,24 @@ var MESSAGES = {
     providerUnsupported: 'provider 只支持 cindy / brave / tavily / deepseek',
     prefsUnavailable: '搜索偏好读取失败，请稍后重试或显式选择搜索源',
     unknownTool: '未知工具:{tool}',
+    pageUrlInvalid: 'url 必须是最多 2048 字符且不含凭证的公开 HTTP(S) 绝对地址',
+    pageConfirmRequired: '发送前必须请用户明确确认：该 URL 是公开页面，完整路径和查询参数不含会话、重置、签名或 webhook 凭证，并允许将完整 URL 发送给 Tavily；确认后传 confirm_public_url:true 重试',
+    pageDepthUnsupported: 'extract_depth 只支持 basic / advanced',
+    pageTavilyKeyRejected: 'Tavily API Key 无效或未配置，请在主界面侧边栏「插件」→「Web Search」详情页检查 Key',
+    pageTavilyPermissionDenied: 'Tavily 拒绝了正文读取请求，请检查 API Key 权限或账户状态',
+    pageTavilyRateLimited: 'Tavily 请求过于频繁，请等待限流恢复后再试',
+    pageTavilyQuotaExhausted: 'Tavily 额度不足或账户不可用，请在 Tavily 控制台检查额度与账户状态',
+    pageTavilyUnavailable: 'Tavily 正文读取服务暂时不可用，请稍后再试',
+    pageTavilyRejected: 'Tavily 无法处理这个网页，请确认 URL 可公开访问后再试',
+    pageReadTimedOut: '网页正文读取超时，请稍后重试或改用 basic 模式',
+    pageTavilyKeyMissing: 'Tavily API Key 未配置，请在主界面侧边栏「插件」→「Web Search」详情页填写 Key',
+    pageReadTransportFailed: '无法连接 Tavily 正文读取服务，请检查网络后再试',
+    pageResponseTooLarge: 'Tavily 返回的数据过大，无法安全解析，请换一个更具体的网页',
+    pageResponseUnparsable: 'Tavily 返回了无法解析的数据，请稍后再试',
+    pageResponseMalformed: 'Tavily 返回的数据格式异常，请稍后再试',
+    pageUnreadable: 'Tavily 无法读取这个网页，请确认页面可公开访问后再试',
+    pageNoContent: '这个网页没有可读取的正文内容',
+    pageFetchFailed: '网页正文读取失败，请稍后重试',
     resultNote: '经 {provider} 搜索到 {count} 条结果',
     searchFailed: '搜索失败:{detail}',
   },
@@ -65,6 +88,24 @@ var MESSAGES = {
     providerUnsupported: 'provider only supports cindy / brave / tavily / deepseek',
     prefsUnavailable: 'Failed to read search preferences. Try again later or choose a provider explicitly.',
     unknownTool: 'Unknown tool: {tool}',
+    pageUrlInvalid: 'url must be a public HTTP(S) absolute address of at most 2048 characters and must not contain credentials',
+    pageConfirmRequired: 'Ask the user for explicit confirmation before sending: the URL is a public page, its full path and query contain no session, reset, signature or webhook credential, and the full URL may be sent to Tavily; then retry with confirm_public_url:true',
+    pageDepthUnsupported: 'extract_depth only supports basic / advanced',
+    pageTavilyKeyRejected: 'The Tavily API Key is invalid or missing. Check the key in "Plugins" > "Web Search" details.',
+    pageTavilyPermissionDenied: 'Tavily rejected the page reading request. Check the API Key permissions and account status.',
+    pageTavilyRateLimited: 'Tavily requests are too frequent. Wait for the rate limit to reset and try again.',
+    pageTavilyQuotaExhausted: 'The Tavily quota is exhausted or the account is unusable. Check your quota and account status in the Tavily console.',
+    pageTavilyUnavailable: 'Tavily page reading is temporarily unavailable. Please try again later.',
+    pageTavilyRejected: 'Tavily could not handle this page. Confirm the URL is publicly reachable and try again.',
+    pageReadTimedOut: 'Reading the page timed out. Retry later or use basic mode.',
+    pageTavilyKeyMissing: 'No Tavily API Key is configured. Paste one in "Plugins" > "Web Search" details.',
+    pageReadTransportFailed: 'Could not reach the Tavily page reading service. Check your network and try again.',
+    pageResponseTooLarge: 'Tavily returned too much data to parse safely. Try a more specific page.',
+    pageResponseUnparsable: 'Tavily returned data that could not be parsed. Please try again later.',
+    pageResponseMalformed: 'Tavily returned data in an unexpected format. Please try again later.',
+    pageUnreadable: 'Tavily could not read this page. Confirm the page is publicly reachable and try again.',
+    pageNoContent: 'This page has no readable body content',
+    pageFetchFailed: 'Failed to read the page content. Please try again later.',
     resultNote: 'Found {count} results via {provider}',
     searchFailed: 'Search failed: {detail}',
   },
@@ -86,6 +127,24 @@ var MESSAGES = {
     providerUnsupported: 'provider は cindy / brave / tavily / deepseek のみ対応しています',
     prefsUnavailable: '検索設定を読み込めませんでした。しばらくしてから再試行するか、検索元を明示的に指定してください。',
     unknownTool: '不明なツール: {tool}',
+    pageUrlInvalid: 'url は 2048 文字以内の公開 HTTP(S) 絶対アドレスで、認証情報を含まない形式で指定してください',
+    pageConfirmRequired: '送信前にユーザーへ明示的な確認を求めてください:その URL は公開ページであり、パスとクエリにセッション、リセット、署名、webhook の認証情報を含まず、完全な URL を Tavily へ送信してよいことの確認です。確認後に confirm_public_url:true を指定して再試行してください',
+    pageDepthUnsupported: 'extract_depth は basic / advanced のみ対応しています',
+    pageTavilyKeyRejected: 'Tavily API キーが無効または未設定です。メイン画面サイドバーの「プラグイン」→「Web Search」詳細画面でキーを確認してください',
+    pageTavilyPermissionDenied: 'Tavily が本文の読み取りリクエストを拒否しました。API キーの権限とアカウント状態を確認してください',
+    pageTavilyRateLimited: 'Tavily へのリクエストが多すぎます。制限が解除されるまで待ってから再試行してください',
+    pageTavilyQuotaExhausted: 'Tavily の残高が不足しているか、アカウントが利用できません。Tavily コンソールで残高とアカウント状態を確認してください',
+    pageTavilyUnavailable: 'Tavily の本文読み取りサービスは一時的に利用できません。しばらくしてから再試行してください',
+    pageTavilyRejected: 'Tavily はこのページを処理できませんでした。URL が公開アクセス可能か確認して再試行してください',
+    pageReadTimedOut: 'ページ本文の読み取りがタイムアウトしました。しばらくしてから再試行するか、basic モードを使用してください',
+    pageTavilyKeyMissing: 'Tavily API キーが未設定です。メイン画面サイドバーの「プラグイン」→「Web Search」詳細画面でキーを入力してください',
+    pageReadTransportFailed: 'Tavily の本文読み取りサービスに接続できません。ネットワークを確認して再試行してください',
+    pageResponseTooLarge: 'Tavily の応答が大きすぎて安全に解析できません。より具体的なページを指定してください',
+    pageResponseUnparsable: 'Tavily が解析できないデータを返しました。しばらくしてから再試行してください',
+    pageResponseMalformed: 'Tavily の応答データの形式が異常です。しばらくしてから再試行してください',
+    pageUnreadable: 'Tavily はこのページを読み取れませんでした。ページが公開アクセス可能か確認して再試行してください',
+    pageNoContent: 'このページには読み取れる本文がありません',
+    pageFetchFailed: 'ページ本文の読み取りに失敗しました。しばらくしてから再試行してください',
     resultNote: '{provider} で {count} 件の結果が見つかりました',
     searchFailed: '検索に失敗しました: {detail}',
   },
@@ -107,6 +166,24 @@ var MESSAGES = {
     providerUnsupported: 'provider는 cindy / brave / tavily / deepseek만 지원합니다',
     prefsUnavailable: '검색 설정을 읽지 못했습니다. 잠시 후 다시 시도하거나 검색 공급자를 직접 지정하세요.',
     unknownTool: '알 수 없는 도구: {tool}',
+    pageUrlInvalid: 'url은 2048자 이하의 공개 HTTP(S) 절대 주소여야 하며 자격 증명을 포함할 수 없습니다',
+    pageConfirmRequired: '전송 전에 사용자에게 명시적으로 확인을 받으세요: 해당 URL은 공개 페이지이고, 전체 경로와 쿼리에 세션, 재설정, 서명, webhook 자격 증명이 없으며 전체 URL을 Tavily로 보내도 된다는 확인입니다. 확인 후 confirm_public_url:true로 다시 시도하세요',
+    pageDepthUnsupported: 'extract_depth는 basic / advanced만 지원합니다',
+    pageTavilyKeyRejected: 'Tavily API 키가 유효하지 않거나 설정되지 않았습니다. 기본 화면 사이드바의 "플러그인" → "Web Search" 상세 화면에서 키를 확인하세요',
+    pageTavilyPermissionDenied: 'Tavily가 페이지 읽기 요청을 거부했습니다. API 키 권한과 계정 상태를 확인하세요',
+    pageTavilyRateLimited: 'Tavily 요청이 너무 많습니다. 요청 제한이 해제될 때까지 기다린 후 다시 시도하세요',
+    pageTavilyQuotaExhausted: 'Tavily 크레딧이 부족하거나 계정을 사용할 수 없습니다. Tavily 콘솔에서 크레딧과 계정 상태를 확인하세요',
+    pageTavilyUnavailable: 'Tavily 페이지 읽기 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요',
+    pageTavilyRejected: 'Tavily가 이 페이지를 처리하지 못했습니다. URL이 공개적으로 접근 가능한지 확인하고 다시 시도하세요',
+    pageReadTimedOut: '페이지 본문 읽기 시간이 초과되었습니다. 잠시 후 다시 시도하거나 basic 모드를 사용하세요',
+    pageTavilyKeyMissing: 'Tavily API 키가 설정되지 않았습니다. 기본 화면 사이드바의 "플러그인" → "Web Search" 상세 화면에 키를 입력하세요',
+    pageReadTransportFailed: 'Tavily 페이지 읽기 서비스에 연결할 수 없습니다. 네트워크를 확인하고 다시 시도하세요',
+    pageResponseTooLarge: 'Tavily가 반환한 데이터가 너무 커서 안전하게 분석할 수 없습니다. 더 구체적인 페이지를 지정하세요',
+    pageResponseUnparsable: 'Tavily가 분석할 수 없는 데이터를 반환했습니다. 잠시 후 다시 시도하세요',
+    pageResponseMalformed: 'Tavily 응답 데이터의 형식이 비정상입니다. 잠시 후 다시 시도하세요',
+    pageUnreadable: 'Tavily가 이 페이지를 읽지 못했습니다. 페이지가 공개적으로 접근 가능한지 확인하고 다시 시도하세요',
+    pageNoContent: '이 페이지에는 읽을 수 있는 본문이 없습니다',
+    pageFetchFailed: '페이지 본문을 읽지 못했습니다. 잠시 후 다시 시도하세요',
     resultNote: '{provider}에서 검색 결과 {count}개를 찾았습니다',
     searchFailed: '검색 실패: {detail}',
   },
@@ -331,6 +408,149 @@ function searchByo(provider, query, limit, callId) {
   return searchBrave(query, limit);
 }
 
+/** fetch_page: 只读取经用户明确确认的单个公开页面，先做主机侧可达性判断。 */
+function isClearlyNonPublicHostname(hostname) {
+  var host = hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (host === 'localhost' || /\.(localhost|local|internal)$/.test(host)) return true;
+
+  var ipv4 = host.split('.');
+  if (ipv4.length === 4 && ipv4.every(function (part) { return /^\d{1,3}$/.test(part); })) {
+    var octets = ipv4.map(Number);
+    if (octets.some(function (part) { return part > 255; })) return true;
+    var a = octets[0];
+    var b = octets[1];
+    var c = octets[2];
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && ((b === 0 && (c === 0 || c === 2)) || b === 168)) return true;
+    if (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) return true;
+    if (a === 203 && b === 0 && c === 113) return true;
+  }
+
+  if (host.indexOf(':') !== -1) {
+    if (host === '::' || host === '::1' || host.indexOf('::ffff:') === 0) return true;
+    if (/^(fc|fd|fe[89ab]|ff)/.test(host) || host.indexOf('2001:db8:') === 0) return true;
+  }
+  return false;
+}
+
+function parsePublicPageUrl(value) {
+  if (typeof value !== 'string' || !value || value.length > FETCH_PAGE_MAX_URL_CHARS) return null;
+  if (value !== value.trim() || value.indexOf('\\') !== -1) return null;
+  if (/[\u0000-\u001f\u007f]/.test(value)) return null;
+  try {
+    var parsed = new URL(value);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.username || parsed.password || !parsed.hostname) return null;
+    if (isClearlyNonPublicHostname(parsed.hostname)) return null;
+    // Fragments are browser-local and are never part of the HTTP resource.
+    parsed.hash = '';
+    return parsed.href;
+  } catch (e) {
+    return null;
+  }
+}
+
+function tavilyHttpError(status) {
+  if (status === 401) return t('pageTavilyKeyRejected');
+  if (status === 403) return t('pageTavilyPermissionDenied');
+  if (status === 429) return t('pageTavilyRateLimited');
+  if (status === 432 || status === 433) return t('pageTavilyQuotaExhausted');
+  if (status >= 500) return t('pageTavilyUnavailable');
+  return t('pageTavilyRejected');
+}
+
+function tavilyTransportError(message) {
+  var text = typeof message === 'string' ? message : '';
+  if (/\u8d85\u65f6|timeout|abort/i.test(text)) return t('pageReadTimedOut');
+  if (/\u51ed\u8bc1|secret|api\s*key|\u672a\u914d\u7f6e|not configured/i.test(text)) return t('pageTavilyKeyMissing');
+  return t('pageReadTransportFailed');
+}
+
+/** Tavily Extract:单 URL 正文读取，Key 仍由主机注入 Authorization:Bearer。 */
+async function fetchPage(args, callId) {
+  var requestedUrl = parsePublicPageUrl(args && args.url);
+  if (!requestedUrl) {
+    return { ok: false, message: t('pageUrlInvalid') };
+  }
+  if (!args || args.confirm_public_url !== true) {
+    return {
+      ok: false,
+      message: t('pageConfirmRequired'),
+    };
+  }
+  var depth = args && args.extract_depth === 'advanced' ? 'advanced' : 'basic';
+  if (args && args.extract_depth !== undefined && args.extract_depth !== 'basic' && args.extract_depth !== 'advanced') {
+    return { ok: false, message: t('pageDepthUnsupported') };
+  }
+
+  var r;
+  try {
+    r = await cindy.fetch({
+      url: TAVILY_EXTRACT_URL,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        urls: requestedUrl,
+        extract_depth: depth,
+        include_images: false,
+        include_favicon: false,
+        format: 'markdown',
+        timeout: depth === 'advanced' ? 45 : 20,
+      }),
+      timeoutMs: FETCH_PAGE_HOST_TIMEOUT_MS,
+      callId: callId,
+    });
+  } catch (e) {
+    return { ok: false, message: tavilyTransportError(e && e.message) };
+  }
+  if (!r.ok) return { ok: false, message: tavilyTransportError(r.message) };
+  if (r.status !== 200) return { ok: false, message: tavilyHttpError(r.status) };
+  if (r.truncated) return { ok: false, message: t('pageResponseTooLarge') };
+  if (typeof r.body !== 'string' || r.body.length > FETCH_PAGE_MAX_RESPONSE_CHARS) {
+    return { ok: false, message: t('pageResponseTooLarge') };
+  }
+
+  var data;
+  try {
+    data = JSON.parse(r.body);
+  } catch (e) {
+    return { ok: false, message: t('pageResponseUnparsable') };
+  }
+  if (!data || !Array.isArray(data.results) || !Array.isArray(data.failed_results)) {
+    return { ok: false, message: t('pageResponseMalformed') };
+  }
+  if (data.results.length !== 1) {
+    if (data.results.length === 0 && data.failed_results.length > 0) {
+      return { ok: false, message: t('pageUnreadable') };
+    }
+    return { ok: false, message: t('pageResponseMalformed') };
+  }
+
+  var item = data.results[0];
+  var resultUrl = parsePublicPageUrl(item && item.url);
+  if (!resultUrl || typeof item.raw_content !== 'string') {
+    return { ok: false, message: t('pageResponseMalformed') };
+  }
+  var content = item.raw_content.trim();
+  if (!content) return { ok: false, message: t('pageNoContent') };
+  var contentChars = content.length;
+  var truncated = contentChars > FETCH_PAGE_MAX_CONTENT_CHARS;
+  if (truncated) content = content.slice(0, FETCH_PAGE_MAX_CONTENT_CHARS);
+  return {
+    ok: true,
+    provider: 'tavily',
+    url: resultUrl,
+    content: content,
+    format: 'markdown',
+    extract_depth: depth,
+    content_chars: contentChars,
+    truncated: truncated,
+  };
+}
+
 async function searchWeb(args, callId, callerTool) {
   var query = args && typeof args.query === 'string' ? args.query.trim() : '';
   if (!query) return { ok: false, message: t('queryEmpty') };
@@ -363,13 +583,34 @@ cindy.onHostMessage(async function (msg) {
   }
   if (msg.type !== 'tool-call') return;
   await ensureLocale();
-  if (msg.tool !== 'search_web') {
+  if (msg.tool !== 'search_web' && msg.tool !== 'fetch_page') {
     cindy.send({ type: 'tool-result', callId: msg.callId, ok: false, message: t('unknownTool', { tool: msg.tool }) });
     return;
   }
   try {
-    var r = await searchWeb(msg.args || {}, msg.callId, msg.tool);
+    var r =
+      msg.tool === 'fetch_page'
+        ? await fetchPage(msg.args || {}, msg.callId)
+        : await searchWeb(msg.args || {}, msg.callId, msg.tool);
     if (r.ok) {
+      if (msg.tool === 'fetch_page') {
+        cindy.send({
+          type: 'tool-result',
+          callId: msg.callId,
+          ok: true,
+          result: {
+            provider: r.provider,
+            url: r.url,
+            content: r.content,
+            format: r.format,
+            extract_depth: r.extract_depth,
+            content_chars: r.content_chars,
+            truncated: r.truncated,
+            content_is_untrusted: true,
+          },
+        });
+        return;
+      }
       cindy.send({
         type: 'tool-result',
         callId: msg.callId,
@@ -395,7 +636,10 @@ cindy.onHostMessage(async function (msg) {
       callId: msg.callId,
       ok: false,
       errorCode: err && err.errorCode ? err.errorCode : 'INTERNAL',
-      message: t('searchFailed', { detail: err && err.message ? err.message : String(err) }),
+      message:
+        msg.tool === 'fetch_page'
+          ? t('pageFetchFailed')
+          : t('searchFailed', { detail: err && err.message ? err.message : String(err) }),
     });
   }
 });

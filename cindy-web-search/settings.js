@@ -19,7 +19,7 @@
 var MESSAGES = {
   'zh-CN': {
     cindyAiTitle: '默认使用 Cindy AI 搜索',
-    cindyAiHint: '也可关闭并使用自己的 Brave / Tavily / DeepSeek Key。',
+    cindyAiHint: '也可关闭并使用自己的 Brave / Tavily / DeepSeek Key。配置 Tavily Key 后，即使保持 Cindy AI 搜索也会独立启用经用户明确确认的公开网页正文读取。',
     cindyAiAria: '使用 Cindy AI 搜索',
     byoTitle: '自备搜索渠道',
     byoHint: '关闭 Cindy AI 搜索后使用。',
@@ -28,6 +28,7 @@ var MESSAGES = {
     save: '保存',
     clear: '清除',
     consoleLink: '前往控制台获取 ↗',
+    tavilyPageHint: '用于 Tavily 搜索和经用户确认的公开网页正文读取；即使保持 Cindy AI 搜索也可单独使用正文读取。',
     deepSeekHint: '查询最多 128 个 Unicode 字符。搜索按成功请求计费，使用你的 DeepSeek 账户余额。',
     emptyPhBrave: '粘贴 BSA 开头的 key',
     emptyPhTavily: '粘贴 tvly- 开头的 key',
@@ -48,7 +49,7 @@ var MESSAGES = {
   },
   en: {
     cindyAiTitle: 'Use Cindy AI search by default',
-    cindyAiHint: 'Or turn it off and use your own Brave / Tavily / DeepSeek key.',
+    cindyAiHint: 'Or turn it off and use your own Brave / Tavily / DeepSeek key. A configured Tavily key also enables reading any explicitly confirmed public page, even while Cindy AI search stays on.',
     cindyAiAria: 'Use Cindy AI search',
     byoTitle: 'Your own search provider',
     byoHint: 'Used when Cindy AI search is off.',
@@ -57,6 +58,7 @@ var MESSAGES = {
     save: 'Save',
     clear: 'Clear',
     consoleLink: 'Get it from the console ↗',
+    tavilyPageHint: 'Used for Tavily search and for reading explicitly confirmed public pages; page reading works independently even while Cindy AI search stays on.',
     deepSeekHint: 'Queries are limited to 128 Unicode characters. Searches are billed per successful request against your DeepSeek account balance.',
     emptyPhBrave: 'Paste a key starting with BSA',
     emptyPhTavily: 'Paste a key starting with tvly-',
@@ -77,7 +79,7 @@ var MESSAGES = {
   },
   ja: {
     cindyAiTitle: '既定で Cindy AI 検索を使用',
-    cindyAiHint: 'オフにして、自分の Brave / Tavily / DeepSeek キーを使うこともできます。',
+    cindyAiHint: 'オフにして、自分の Brave / Tavily / DeepSeek キーを使うこともできます。Tavily キーを設定すると、Cindy AI 検索をオンのままにしていても、ユーザーが明示的に確認した公開ページの本文読み取りが有効になります。',
     cindyAiAria: 'Cindy AI 検索を使用',
     byoTitle: '自分で用意する検索プロバイダー',
     byoHint: 'Cindy AI 検索をオフにしたときに使用します。',
@@ -86,6 +88,7 @@ var MESSAGES = {
     save: '保存',
     clear: 'クリア',
     consoleLink: 'コンソールで取得 ↗',
+    tavilyPageHint: 'Tavily 検索と、ユーザーが明示的に確認した公開ページの本文読み取りに使います。本文読み取りは Cindy AI 検索をオンのままにしていても単独で利用できます。',
     deepSeekHint: 'クエリは最大 128 文字（Unicode 文字単位）です。検索は成功したリクエストごとに課金され、DeepSeek アカウントの残高から支払われます。',
     emptyPhBrave: 'BSA で始まるキーを貼り付け',
     emptyPhTavily: 'tvly- で始まるキーを貼り付け',
@@ -106,7 +109,7 @@ var MESSAGES = {
   },
   ko: {
     cindyAiTitle: '기본으로 Cindy AI 검색 사용',
-    cindyAiHint: '끄고 자신의 Brave / Tavily / DeepSeek 키를 사용할 수도 있습니다.',
+    cindyAiHint: '끄고 자신의 Brave / Tavily / DeepSeek 키를 사용할 수도 있습니다. Tavily 키를 설정하면 Cindy AI 검색을 켠 상태로 두더라도 사용자가 명시적으로 확인한 공개 페이지의 본문 읽기가 별도로 활성화됩니다.',
     cindyAiAria: 'Cindy AI 검색 사용',
     byoTitle: '직접 준비한 검색 공급자',
     byoHint: 'Cindy AI 검색을 끄면 사용됩니다.',
@@ -115,6 +118,7 @@ var MESSAGES = {
     save: '저장',
     clear: '지우기',
     consoleLink: '콘솔에서 발급받기 ↗',
+    tavilyPageHint: 'Tavily 검색과 사용자가 명시적으로 확인한 공개 페이지 본문 읽기에 사용됩니다. 본문 읽기는 Cindy AI 검색을 켠 상태로 두더라도 별도로 사용할 수 있습니다.',
     deepSeekHint: '검색어는 Unicode 문자 기준 최대 128자입니다. 검색은 성공한 요청마다 과금되며 DeepSeek 계정 잔액에서 차감됩니다.',
     emptyPhBrave: 'BSA로 시작하는 키 붙여넣기',
     emptyPhTavily: 'tvly-로 시작하는 키 붙여넣기',
