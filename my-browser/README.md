@@ -6,6 +6,7 @@ A unified Cindy browser companion candidate. **0.4.10** brings compact reading c
 
 ## Reading and learning
 
+- The selection popup is off by default. In the extension panel, open Settings and check “Show Cindy button when selecting text” to enable it. The choice is saved across page loads and synchronized between tabs; unchecking it immediately removes any visible selection button. The selection context menu remains available.
 - Cancellation also applies while discovering the local connection. Request deadlines include serialized task execution and repair attempts; completed response receipts no longer consume running-request capacity. Browser and plugin updates are both required for this fix.
 - Player controls adapt to narrow widths and long language names. Menus stay within the visible player, keep their close button available while scrolling, and do not overprint subtitles; long captions shrink to fit small players.
 - Captions move toward the bottom when YouTube controls hide and make room when controls reappear. Preparation details, blockers and cache status live inside the subtitle menu. The preparation bar measures playback readiness and reaches Ready once buffered; whole-video translation percentages never float over the video.
