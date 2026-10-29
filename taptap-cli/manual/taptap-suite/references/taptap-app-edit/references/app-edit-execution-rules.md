@@ -64,8 +64,8 @@
 
 - HTTP 200 / 顶层成功只说明预检执行成功；分别读取预审结果、blockers 和 warnings。预审通过不能覆盖非空 blockers，blockers 为空也不能把预审未通过说成通过。字段缺失时说明结果未知，不补写“阻塞项：无”。
 - 预审不通过本身不禁止提审。展示本次问题与风险，用户明确选择继续/「强制提交」后允许 submit，由提交接口裁决；不要自行新增本地硬门禁或宣称必定被拒绝。
-- 本次预检通过且 blockers 明确为空时展示“阻塞项：无”和“提交状态：可提交审核”；预审未通过且无阻断时同时说明“不阻断提交，但可能被审核驳回”。
-- `preaudit_passed` 仅用于内部判断，不得原样输出 `Blocker`、`preaudit_passed=true` 等机器字段。
+- 本次预审通过（`preaudit_status === "passed"`）且 blockers 明确为空时展示“阻塞项：无”和“提交状态：可提交审核”；`preaudit_status === "rejected"` 且无阻断时同时说明“不阻断提交，但可能被审核驳回”；`preaudit_status === "unavailable"` 说明“本次预检没得出内容预审结论，可稍后重试预检，也可直接提交”，不得说成预审未通过。
+- `preaudit_status` 是机审结论的主口径（缺失时退回 `preaudit_passed`）；两者都仅用于内部判断，不得原样输出 `Blocker`、`preaudit_passed=true` 等机器字段。
 - blockers 按服务端原文展示；协议同意仍走下方独立签署流程，不能用继续提交的授权代替签约。
 - 资质缺口（`QUALIFICATION_INCOMPLETE`）是 warning、submit 不卡控 → 展示"继续提审可能被驳回"并询问是否继续。
 - 复核返回风险数据不可用且要求确认时展示 warning；`--yes` 不代表已核对。schema 未声明风险确认输入时停止并报告契约缺口，不补造本地 flag。

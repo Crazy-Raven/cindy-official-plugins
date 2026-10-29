@@ -76,7 +76,8 @@
 | 查下载、PV、转化、订单、评分统计等数据 | `dashboard-stats` | 先确认指标、维度和时间范围 |
 | 查论坛访问量、活跃用户、内容发布/删除/移动、区间回复新增等论坛数据 | `dashboard-stats`(forum stats) | 用 `get-forum-stats`,先确认 `type`、维度和时间范围 |
 | 查玩家评价正文、差评、官方回复 | `player-feedback` | 先确认时间范围和评分口径 |
-| 查论坛帖子、子版块、帖子正文、一级回复和子回复 | `community-management` | 先确认帖子意图、子版块和时间范围 |
+| 查论坛帖子、子版块、帖子正文、一级回复和子回复,或发帖/回帖 | `community-management` | 先确认帖子意图、子版块和时间范围;发帖先给预览再发布 |
+| 把本地图片或视频传成帖子素材,或给一级回复配图 | `community-management`(帖子素材上传) | 帖子:图片 `+upload-image`、视频 `+upload-video`;一级回复只用图片 `+upload-image`;子回复只支持文字,回复都不支持视频;别走素材库 `upload` / `upload-video` |
 | 管理测试计划、资格批次、用户资格、激活码 | `test-plan` | 先区分状态层级 |
 
 ## call_tool 返回解读
@@ -99,7 +100,7 @@
 - 业务字段统一放 `args.data`,只有 `developer_id` / `app_id` 是独立 scope 字段(映射为 `--dev-id` / `--app-id`)。除 scope 和 `data` 外的键都是控制 flag,透传成 `--flag`,合法性由 CLI 按各命令自己的 schema 校验(未知 flag 由 CLI 拒绝);不确定可用 flag 时先对目标命令传 `args._help:true` 看完整帮助。typed 命令的 `data` 是完整 tool input。
 - 默认输出就是 JSON,不要追加冗余的 `--format json`。
 - 面向用户回复时先给业务结论,再给风险和下一步;把字段 ID、camelCase key、数值状态和内部工具名翻译成可读标签。除非用户明确要求调试信息,不粘贴完整 raw JSON、schema 或底层请求。
-- `precheck-app-review` 返回 `blockers` 非空或 `preaudit_passed === false` 时,只展示 `blockers` 逐项事实;涉及 SCE 等协议时走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户在当前对话明确同意后加 `yes: true` 执行,再重查确认 blocker 消失),否则向用户逐项展示卡点并询问是否强制提交(预检可跳过,最终由服务端校验裁决)。不得回传任何 token,也不能补造本地参数或请求字段。
+- `precheck-app-review` 返回 `blockers` 非空或 `preaudit_status === "rejected"` 时,只展示 `blockers` 逐项事实;`preaudit_status === "unavailable"`(机审没跑成)不是卡点,说明本次没审成、可稍后重试预检或直接提交;响应里没有 `preaudit_status` 时退回按 `preaudit_passed` 判断。涉及 SCE 等协议时走独立的 `agree-sce-agreement`(先展示协议名称与 URL,用户在当前对话明确同意后加 `yes: true` 执行,再重查确认 blocker 消失),否则向用户逐项展示卡点并询问是否强制提交(预检可跳过,最终由服务端校验裁决)。不得回传任何 token,也不能补造本地参数或请求字段。
 - `auth status` 只在用户询问当前身份、登录失败或错误要求重登时调用,不作为每个任务的固定前置。唯一额外场景是人工页面交接需要区分当前构建环境且上下文中没有 `serverUrl`:此时只调用 `call_tool(name:"auth status", args:{offline:true})` 读取环境地址,不检查 Token 或访问网络。
 - 长任务(上传大文件)超时返回 `TIMEOUT` 时,可加大 `_timeout_seconds`(最大 870)重试,或用 `task` 类命令查看/恢复已有上传任务,不要盲目重发完整上传。
 

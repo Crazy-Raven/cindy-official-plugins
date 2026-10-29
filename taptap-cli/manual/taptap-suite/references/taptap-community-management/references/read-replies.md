@@ -17,7 +17,7 @@ call_tool(name:"community-management list-community-moment-replies", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{moment_id:"<momentId>", page:1, page_size:20}})
 
-# 某条回复下的子回复（parent_reply_id 取一级回复的 comment_id）
+# 某条回复下的子回复（parent_reply_id 传要展开的那条回复 ID）
 call_tool(name:"community-management list-community-moment-child-replies", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{moment_id:"<momentId>", parent_reply_id:"<replyId>", page:1, page_size:20}})
@@ -43,7 +43,7 @@ call_tool(name:"community-management list-community-moment-child-replies", args:
 
 | 字段 | 说明 |
 | --- | --- |
-| `comment_id` | 回复 ID（字符串，原样回传即可作为 `parent_reply_id`） |
+| `comment_id` | 回复 ID（字符串）。读接口可原样回传作为 `parent_reply_id`；写入子回复时只有一级回复的 `comment_id` 能当 `parent_reply_id`，更深的目标用 `reply_to_reply_id` |
 | `content` | 回复正文原文，保留 BBCode |
 | `created_time` | 回复时间（Unix 秒） |
 | `ups` | 点赞数 |

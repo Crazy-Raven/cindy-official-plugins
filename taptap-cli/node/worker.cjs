@@ -524,7 +524,7 @@ const EXCLUDED_COMMANDS = new Set(['update']);
 const SERVICE_DESCRIPTIONS = {
   app: '游戏资料、包体槽位、版本生命周期、审核与发布',
   'asset-library': '图片/视频素材库检索、收录与上传',
-  'community-management': '论坛社区帖子、子版块、一级回复与子回复(当前只读)',
+  'community-management': '论坛社区帖子、子版块、回复、发帖与回帖,以及帖子配图/视频上传',
   'dashboard-stats': '下载、曝光、转化、预约、订单、评分等数据表现查询',
   developer: '开发者账号与厂商列表',
   'package-management': '包体库、线上/待处理包、自测入口与小游戏能力',
@@ -1091,6 +1091,28 @@ function buildArgv(tokens, args) {
   return { argv };
 }
 
+// A structured error does not prove a write never reached the server. Upstream
+// 5xx responses, network-level failures after dispatch and the CLI's explicit
+// ambiguous subtypes all leave the outcome open; only a refusal the CLI could
+// determine stays not_executed.
+const AMBIGUOUS_ERROR_SUBTYPES = new Set([
+  'ambiguous_outcome',
+  'task_finalization_unknown',
+  'result_unknown',
+  'temporarily_unavailable',
+  'server_error',
+  'timeout',
+  'transport',
+  'sdk_error',
+  'invalid_response',
+  'unknown',
+]);
+function errorMayHaveLanded(err) {
+  if (!err) return false;
+  if (String(err.type || '') === 'network') return true;
+  return AMBIGUOUS_ERROR_SUBTYPES.has(String(err.subtype || ''));
+}
+
 async function callTool(params) {
   const runOpts = runOptions(params);
   const name = params && typeof params.name === 'string' ? params.name.trim() : '';
@@ -1370,7 +1392,11 @@ async function callTool(params) {
     // A bare non-zero exit with no envelope (crash, signal, killed helper) is
     // likewise indeterminate for a write.
     const err = env && env.ok === false && env.error ? env.error : null;
-    let ambiguous = Boolean(err) && /ambiguous|unknown|indeterminate/i.test(String(err.subtype || '') + String(err.type || ''));
+    // Without an envelope there is no subtype to read; the text check must stay
+    // behind the null guard or a bare crash turns into an internal error.
+    const ambiguousByText = Boolean(err)
+      && /ambiguous|unknown|indeterminate/i.test(String(err.subtype || '') + String(err.type || ''));
+    let ambiguous = errorMayHaveLanded(err) || ambiguousByText;
     // A batch can fail after some items already succeeded: the manual tells the
     // agent to keep the handles that came back and retry only the items without
     // one. Calling that "not executed" would invite a full re-run and duplicate

@@ -30,6 +30,12 @@ call_tool(name:"app list-app-versions", args:{app_id:"<appId>", developer_id:"<d
 
 若分页被 `page_limit` 截断、返回条目数无法覆盖 `result.total`、任一 item 的 `status` 为空或超出 `draft/reviewing/scheduled/online/offline/rejected`，且没有可解释的 `last_event`，均视为历史不完整，阶段回退 `unknown`。统计发布历史时按 `version` 去重：同一版本同时出现 `status=online` 和 `last_event=published` 只算一个已发布版本。
 
+## 发布后的社区发帖（可选 tip）
+
+handoff 收尾时可以顺带问一句：要不要根据本次发布内容或版本更新，去游戏论坛发个帖子？用户说要，就直接交给 `taptap-community-management` 手册，本节不展开命令与写法。
+
+发帖是可选动作，不占用下面「每次 handoff 最多输出一个手册」的名额。
+
 ## 输出格式
 
 每次 handoff 最多输出一个手册：先用一句话说明“为什么适合当前阶段”和从 `description` 压缩出的用途，再将 `url` 裸链单独一行输出一次。不要使用 Markdown 链接包装、括号重复 URL、追踪参数或二维码。

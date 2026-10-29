@@ -47,6 +47,8 @@ const FIXTURE_TREE = {
     ['+bind-spark-version', 'Bind a Spark version'],
     ['fail-op', 'Always fails with a structured error'],
     ['partial-op', 'Fails after uploading some items'],
+    ['unavail-op', 'Fails with an upstream 5xx after dispatch'],
+    ['crash-op', 'Exits non-zero with plain text and no envelope'],
     ['+list', 'List games visible under a developer account'],
     ['create-app', 'Create a game draft'],
     ['submit-app-review', 'Submit app edit for review'],
@@ -111,6 +113,8 @@ const FIXTURE_RISK = {
   'auth logout': 'write',
   'app fail-op': 'write',
   'app partial-op': 'write',
+  'app unavail-op': 'write',
+  'app crash-op': 'write',
 };
 
 const FIXTURE_SCHEMA = [
@@ -168,6 +172,14 @@ if (args[1] === 'fail-op') {
 if (args[1] === 'partial-op') {
   process.stderr.write(JSON.stringify({ ok: false, error: { type: 'api', subtype: 'partial_failure', message: '2 of 3 uploaded' }, data: { uploaded: [{ handle: 'h1' }, { handle: 'h2' }] } }));
   process.exit(2);
+}
+if (args[1] === 'unavail-op') {
+  process.stderr.write(JSON.stringify({ ok: false, error: { type: 'api', subtype: 'server_error', message: 'upstream 503' } }));
+  process.exit(3);
+}
+if (args[1] === 'crash-op') {
+  process.stderr.write('panic: connection reset');
+  process.exit(4);
 }
 // Bare \`version\` is the settings status probe. With flags it is just an
 // arbitrary command to the control-flag test, which expects the echo below.
@@ -448,6 +460,32 @@ test('a CLI failure envelope is read from stderr and reported as a business erro
   assert.equal(reply.result.execution_state, 'not_executed');
   assert.equal(reply.result.data.error.type, 'validation');
   assert.match(reply.result.message, /fix it/);
+});
+
+test('an upstream 5xx on a write stays unknown, not "not executed"', async () => {
+  // A 5xx (or any network-level failure) can arrive after the server already
+  // applied the write. The CLI only knows it failed, not whether it landed, so
+  // the worker must not turn it into a retryable "not executed" signal.
+  const [reply] = await callWorker([
+    callTool('app unavail-op', { cli_path: fakeCli, args: { yes: true } }),
+  ]);
+  assert.equal(reply.result.ok, false);
+  assert.equal(reply.result.errorCode, 'BUSINESS_ERROR');
+  assert.equal(reply.result.execution_state, 'unknown');
+  assert.match(reply.result.message, /核对实际状态/);
+});
+
+test('a bare non-zero exit keeps CLI_FAILED and the raw output', async () => {
+  // No envelope means no error.type/subtype to read. The text probe must not
+  // dereference the missing error object, or a crash is reported as INTERNAL and
+  // the agent loses the exit code and the original stderr.
+  const [reply] = await callWorker([
+    callTool('app crash-op', { cli_path: fakeCli, args: { yes: true } }),
+  ]);
+  assert.equal(reply.result.ok, false);
+  assert.equal(reply.result.errorCode, 'CLI_FAILED');
+  assert.equal(reply.result.execution_state, 'unknown');
+  assert.match(reply.result.data.raw, /connection reset/);
 });
 
 test('a write that failed with partial results is never "not executed"', async () => {
@@ -902,6 +940,166 @@ test('the 2026.10.20 recovery guidance stays on the plugin path', () => {
   assert.doesNotMatch(appEditManual, /`visible` \/ `required`/, 'visibility and requiredness must both use state');
 });
 
+test('the 2026.10.28 sync keeps the new community write path on the plugin path', () => {
+  // CLI v2026.10.28 turns the forum domain from read-only into read + write:
+  // post drafts and publishing, first-level and child replies, and two upload
+  // shortcuts. The bundled manual is the only path the agent may take, so each
+  // new reference is adapted to call_tool instead of copied as a shell command.
+  const manualRoot = path.join(root, 'taptap-cli', 'manual');
+  const read = (relative) => fs.readFileSync(path.join(manualRoot, relative), 'utf8');
+  const community = read('taptap-suite/references/taptap-community-management/MANUAL.md');
+  const post = read('taptap-suite/references/taptap-community-management/references/publish-post.md');
+  const reply = read('taptap-suite/references/taptap-community-management/references/reply-moment.md');
+  const uploadImage = read('taptap-suite/references/taptap-community-management/references/upload-image.md');
+  const uploadVideo = read('taptap-suite/references/taptap-community-management/references/upload-video.md');
+  const shared = read('taptap-suite/references/shared-execution.md');
+  const routing = read('taptap-suite/references/business-routing.md');
+  const handbooks = read('taptap-suite/references/operation-handbooks.md');
+  const top = read('taptap-suite/MANUAL.md');
+  const audit = read('taptap-suite/references/taptap-app-edit/references/app-edit-audit-and-history.md');
+  const appEdit = read('taptap-suite/references/taptap-app-edit/MANUAL.md');
+  const rules = read('taptap-suite/references/taptap-app-edit/references/app-edit-execution-rules.md');
+
+  // The domain is no longer advertised as read-only, and routing agrees.
+  assert.doesNotMatch(community, /community-management 是\*\*只读\*\*入口/);
+  assert.doesNotMatch(routing, /论坛管理当前只读/);
+  for (const reference of ['upload-image.md', 'upload-video.md', 'publish-post.md', 'reply-moment.md']) {
+    assert.match(community, new RegExp(reference.replace('.', '\\.')), `${reference} must be referenced`);
+  }
+
+  // Publishing is the irreversible step: preview first, publish next turn.
+  assert.match(post, /同一轮内禁止 create-draft → publish-draft 连跑/, 'publish is cross-turn');
+  assert.match(post, /call_tool\(name:"community-management publish-community-topic-draft"/);
+  assert.match(post, /`draft_id` 不要写进 `document`/, 'the nested-shape trap must stay documented');
+  assert.match(post, /`contents` 是字符串不是数组/);
+  assert.match(post, /`preview_url` 是发布前唯一可交付的预览/);
+  assert.doesNotMatch(post, /发布前把完整文档和 `publish_url`/, 'publish_url only exists after a successful publish');
+  assert.match(reply, /call_tool\(name:"community-management create-community-moment-reply-child"/);
+  assert.match(reply, /`parent_reply_id` 必须是一级回复/);
+  // The read path accepts any reply level, the write path only a first-level
+  // reply. Both manuals have to say which is which, or the agent follows the
+  // wrong one.
+  const readReplies = read('taptap-suite/references/taptap-community-management/references/read-replies.md');
+  assert.match(community, /读接口里的父回复可以是任意层级/);
+  assert.match(community, /写入子回复时 `parent_reply_id` 必须是该帖的一级回复/);
+  assert.match(readReplies, /父回复可以是任意层级/);
+  assert.match(readReplies, /只有一级回复的 `comment_id` 能当 `parent_reply_id`/);
+  assert.match(uploadImage, /没有 `assetId`/, 'community images are not asset-library handles');
+  assert.match(uploadImage, /`width` \/ `height` 必须回传/);
+  assert.match(uploadVideo, /`normal` \/ `transcoding` \/ `regulating` 都算正常/);
+  assert.match(uploadVideo, /complete-community-moment-video-upload/);
+  // The top-level shortcut only returns a handle; the listing field write is a
+  // separate app-edit step.
+  assert.doesNotMatch(uploadVideo, /直接写回资料字段/);
+  assert.match(uploadVideo, /仍要由 `app-edit` 用 `save-changes` 回填并读回/);
+  // "Preview" means a real draft plus preview_url, not a dry run: drying the
+  // create would leave the user with nothing to look at.
+  assert.match(post, /`dry_run:true` 只打印请求、不建草稿/);
+  assert.match(post, /# 1\) 建草稿[^\n]*真实创建才会返回 preview_url/);
+  assert.match(community, /例外是发帖草稿的建\/改/);
+
+  // The quick table must not hand the first-level reply call to a child reply:
+  // that writes to the post root, and the domain has no delete.
+  assert.match(community, /\| 回帖\(一级回复\)/);
+  assert.match(community, /\| 回帖\(某条回复下的子回复\)/);
+  assert.doesNotMatch(community, /要回帖\(一级回复 \/ 子回复\)/);
+  // Draft creation is a real write: a dry run produces no preview_url.
+  assert.match(community, /create-community-topic-draft[\s\S]{0,160}yes:true/);
+  assert.doesNotMatch(community, /create-community-topic-draft[\s\S]{0,160}dry_run:true/);
+  // The manifest and its four locales carry the same draft exception.
+  const carrierDocs = [
+    JSON.parse(fs.readFileSync(path.join(root, 'taptap-cli', 'ghost.json'), 'utf8')),
+    ...['zh-CN', 'en', 'ja', 'ko'].map((locale) => JSON.parse(
+      fs.readFileSync(path.join(root, 'taptap-cli', 'locales', `${locale}.json`), 'utf8'))),
+  ];
+  for (const carrier of carrierDocs) {
+    const callTool = Array.isArray(carrier.tools)
+      ? carrier.tools.find((tool) => tool.name === 'call_tool')
+      : carrier.tools.call_tool;
+    assert.match(callTool.description, /preview_url/, 'every carrier must state the draft exception');
+  }
+
+  assert.match(shared, /发帖用的 `videoId`/);
+  assert.doesNotMatch(shared, /发帖用的 `video_id`/, 'the upload response field is camelCase videoId');
+  assert.match(community, /要拿发帖用的 `videoId`/);
+  // The post detail payload keeps the server's snake_case field; only the
+  // upload shortcut response is camelCase. Both spellings are correct in their
+  // own place, so the distinction must stay documented.
+  assert.match(read('taptap-suite/references/taptap-community-management/references/read-moments.md'), /只含 `video_id`/);
+
+  // An unknown write outcome must be verified before any retry advice: the
+  // manual may not turn "timed out" into "not executed".
+  assert.match(reply, /结果未知不能当未执行/);
+  assert.match(reply, /先核对远端实际状态/);
+  assert.doesNotMatch(
+    reply,
+    /结果未知[^。\n]*用同一条命令重试/,
+    'an unknown reply outcome must not be told to retry directly',
+  );
+  assert.match(post, /超时或结果未知时,先用 `get-community-topic-draft` 核对/);
+  // `update` / `publish` replace the whole document, so an example that shows
+  // `forum_bindings: []` would silently detach the post from its forums.
+  assert.doesNotMatch(post, /forum_bindings["']?\s*:\s*\[\]/, 'the example must not clear forum bindings');
+  assert.match(post, /清空 `forum_bindings` 等于把帖子从所有论坛撤掉/);
+  assert.match(uploadImage, /结果不确定:先核对/);
+  assert.match(uploadVideo, /结果属于\*\*未知\*\*/);
+  assert.match(uploadVideo, /确认没有产出后,才用同一个文件/);
+  // The command-pattern reference is the second entry the agent reads for
+  // uploads; leaving it on "all local media goes to materials" would hand the
+  // agent a URL that a post cannot use.
+  const patterns = read('taptap-suite/references/cli-command-patterns.md');
+  assert.doesNotMatch(patterns, /本地物料统一进入/, 'the blanket materials route must be scoped');
+  assert.match(patterns, /社区帖子的配图\/视频不走这套/);
+  assert.match(patterns, /community-management \+upload-image/);
+  assert.doesNotMatch(patterns, /返回 video_id（后台转码）/, 'the upload response is videoId');
+
+  for (const [label, text] of [
+    ['publish post', post],
+    ['reply moment', reply],
+    ['upload image', uploadImage],
+    ['upload video', uploadVideo],
+  ]) {
+    assert.match(text, /call_tool\(name:"community-management /, `${label} must call through the plugin`);
+    assert.doesNotMatch(text, /taptap-cli community-management/, `${label} must not hand over a shell command`);
+  }
+
+  // Shared rules: the two community uploads are a domain-local exception, and
+  // the top-level routing names the posting-media path.
+  assert.match(shared, /域内上传例外是 `community-management \+upload-image` 与 `\+upload-video`/);
+  assert.match(shared, /社区 `\+upload-image` \/ `\+upload-video` 省略时按内容派生/);
+  assert.match(shared, /`unknown`（超时、5xx、连接中断、没拿到句柄）不能当成「没上传」直接重传/);
+  assert.match(top, /一级回复只用图片 `\+upload-image`/);
+  assert.match(top, /\| 把本地图片或视频传成帖子素材[^|]*\| `community-management`/);
+  assert.match(handbooks, /发布后的社区发帖/);
+
+  // Precheck: `preaudit_status` is the primary signal, and "unavailable" is a
+  // third state rather than a failure or a content rejection.
+  for (const [label, text] of [
+    ['shared', shared],
+    ['audit', audit],
+    ['app-edit', appEdit],
+    ['rules', rules],
+    ['top', top],
+  ]) {
+    assert.match(text, /preaudit_status/, `${label} must use the tri-state signal`);
+    assert.match(text, /unavailable/, `${label} must name the "not run" state`);
+  }
+  assert.match(audit, /机审没跑成，没有结论/, 'the third state must be explained in the return table');
+  assert.doesNotMatch(audit, /`preaudit_passed === false`（机审未通过）/, 'the old boolean is not the verdict');
+
+  // No carrier may keep calling the forum read-only, including the manifest's
+  // four locale descriptions the agent reads instead of the manifest.
+  for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
+    const resource = JSON.parse(
+      fs.readFileSync(path.join(root, 'taptap-cli', 'locales', `${locale}.json`), 'utf8'));
+    assert.doesNotMatch(
+      resource.description,
+      /只读|read-only|読み取り専用|읽기 전용/,
+      `${locale} must stop describing the forum as read-only`,
+    );
+  }
+});
+
 test('nothing shipped points at the internal taptap/cli repository', () => {
   // The GitHub repository is internal; only the npm package is public. Any
   // link to the repository is therefore a dead end for the people who install
@@ -1300,9 +1498,11 @@ test('a write that fails ambiguously is reported as unknown, never as failed', (
   assert.match(workerSource, /不要直接重跑/, 'an unknown outcome must tell the agent to verify before retrying');
 
   // A structured CLI error is usually the CLI deciding the outcome (not
-  // executed), but an ambiguous subtype (e.g. ambiguous_outcome) means the CLI
-  // does not know whether a write was applied, so it must stay unknown.
-  assert.match(workerSource, /let ambiguous = Boolean\(err\)/);
+  // executed), but ambiguous subtypes — ambiguous_outcome, a 5xx server_error,
+  // a network-level failure — mean the CLI does not know whether a write was
+  // applied, so those must stay unknown.
+  assert.match(workerSource, /let ambiguous = errorMayHaveLanded\(err\)/);
+  assert.match(workerSource, /AMBIGUOUS_ERROR_SUBTYPES\.has/);
   assert.match(workerSource, /\(err && !ambiguous\) \? 'not_executed' : unknownForWrite/);
 
   // The worker computing the state is not enough: the brain must carry it into

@@ -4,7 +4,7 @@
 
 ## 第一部分:本地物料盘点与上传
 
-本部分是六个端到端 upload shortcut(图片、视频、APK、Windows、H5、Tap 小游戏)的**唯一执行入口**:其他手册需要上传本地物料时一律转交到这里,不自行执行上传命令。它负责让本地物料取得可继续处理的远端句柄;不拥有资料字段写入、资料页包体槽位绑定、提审或发布。
+本部分是六个端到端 upload shortcut(图片、视频、APK、Windows、H5、Tap 小游戏)的**执行入口**:资料与素材链路需要上传本地物料时一律转交到这里,不自行执行上传命令。它负责让本地物料取得可继续处理的远端句柄;不拥有资料字段写入、资料页包体槽位绑定、提审或发布。社区发帖的配图/视频不属于这六个 shortcut:走 `taptap-community-management` 的 `+upload-image` / `+upload-video`,不建素材库记录。
 
 **CRITICAL — 不得处理 OSS、Qiniu、upload_token,也不得自行轮询或恢复上传任务;云存储凭证和上传状态机只由 CLI workflow 负责。**
 

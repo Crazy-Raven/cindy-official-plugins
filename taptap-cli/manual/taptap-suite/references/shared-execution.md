@@ -69,7 +69,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 
 `prepare-review-snapshot` 返回的 `warnings` 非空时，先展示无法确认的事实并让用户自行核对。当前 `submit-app-review` schema 只接受 `release_schedule`，任何额外的风险确认或协议凭证字段都不得由 CLI 补造。
 
-`precheck-app-review` 返回 `blockers` 非空 或 `preaudit_passed === false` 时，不要把 `--yes`、历史对话或默认行为解释成用户同意。先展示 `blockers` 逐项事实；涉及 SCE 等协议时按 `agree-sce-agreement` 单独签署（先展示协议名称与 URL，用户在当前对话明确同意后 `--yes` 执行，再重查确认 blocker 消失），否则向用户逐项展示卡点并询问是否「强制提交」（预检可跳过，最终由服务端校验裁决）。不得请求同意或回传任何 token，也不能补造其它本地 flag 或请求字段。
+`precheck-app-review` 返回 `blockers` 非空 或 `preaudit_status === "rejected"` 时，不要把 `--yes`、历史对话或默认行为解释成用户同意。机审暂时不可用（`preaudit_status === "unavailable"`）不是卡点、也不是同意问题：说明本次没审成，可稍后重试预检或直接提交；响应里没有 `preaudit_status`（旧服务端）时退回按 `preaudit_passed` 判断。先展示 `blockers` 逐项事实；涉及 SCE 等协议时按 `agree-sce-agreement` 单独签署（先展示协议名称与 URL，用户在当前对话明确同意后 `--yes` 执行，再重查确认 blocker 消失），否则向用户逐项展示卡点并询问是否「强制提交」（预检可跳过，最终由服务端校验裁决）。不得请求同意或回传任何 token，也不能补造其它本地 flag 或请求字段。
 
 ## JSON 输出外壳和错误类型
 
@@ -97,12 +97,14 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 
 ### 上传 shortcut 约定
 
-`upload`、`upload-video`、`upload-apk`、`upload-pc-package`、`upload-h5-package`、`upload-mini-app-package` 是当前唯一面向 Skill 的端到端本地上传入口，统一由 `taptap-materials` 执行。它们接收一个本地文件位置参数和 app scope，不接收 `--data`；不要调用动态 OpenAPI 的 init、complete 或 status 命令，也不要由 Skill 组装 `file_size`、上传 token 或请求 body。
+`upload`、`upload-video`、`upload-apk`、`upload-pc-package`、`upload-h5-package`、`upload-mini-app-package` 是面向 Skill 的端到端本地上传入口，统一由 `taptap-materials` 执行。它们接收一个本地文件位置参数和 app scope，不接收 `--data`；不要调用动态 OpenAPI 的 init、complete 或 status 命令，也不要由 Skill 组装 `file_size`、上传 token 或请求 body。
+
+域内上传例外是 `community-management +upload-image` 与 `+upload-video`：它们把本地图片/视频传成帖子素材，分别只返回图片地址与宽高、以及发帖用的 `videoId`，不建素材库记录、不发布帖子，由 `taptap-community-management` 执行；它们和素材库的 `upload` / `+upload-video` 是不同链路、要不同的权限，不能互相替代。发帖请求里才用 `pin_video_id` / `cover_video_id`（字符串）与正文节点 `info.video_id`（整数），上传响应字段始终是 `videoId`。发帖本身不在上传 shortcut 里，走 `community-management` 的 `create` / `update` / `get` / `publish-draft` 四步，同样归 `taptap-community-management`。
 
 - 默认输出 JSON，支持的 `--format` 只有 `json` 和 `pretty`；普通 Agent 调用不追加冗余的 `--format json`。
 - 上传 preview 使用 `--dry-run`；用户确认后用相同文件与 scope 追加 `--yes`。省略 `--yes` 的确认门禁是 exit code `10`。
-- 顶层 `ok=true` / exit code `0` 才表示 shortcut 成功。部分失败或其它错误是非零退出；保留响应中已有的远端句柄，只重试没有句柄的文件。
-- 六个 shortcut 都注册 `--idempotency-key`（省略时由 CLI 自动派生），但只有图片必须显式提供稳定 key。视频 preview 会读取实时 `video_spec`，其它四个 preview 不发送网络请求。
+- 顶层 `ok=true` / exit code `0` 才表示 shortcut 成功。部分失败或其它错误是非零退出；保留响应中已有的远端句柄。重试只适用于明确未生效的情况（`execution_state: not_executed`，或逐项失败里明确没开始的项）；`unknown`（超时、5xx、连接中断、没拿到句柄）不能当成「没上传」直接重传——先核对远端是否已有该 URL / `videoId` / 对象句柄，确认没有产出再按同一意图重放（复用同一个 `--idempotency-key`）。
+- 六个素材库 shortcut 都注册 `--idempotency-key`（省略时由 CLI 自动派生），但只有素材库 `upload` 必须显式提供稳定 key；社区 `+upload-image` / `+upload-video` 省略时按内容派生。顶层 `upload-video` 的 preview 会读取实时 `video_spec`；社区两个上传的 preview 都是纯本地，不发网络请求。
 - H5 上传任务和遗留 Tap 小游戏上传任务的状态与恢复由 CLI task workflow 负责；Skill 只能使用 `task +list|get|resume`，不能重新发起协议阶段。
 
 ## 人工页面交接和链接输出

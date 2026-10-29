@@ -49,29 +49,36 @@ H5 开通 PC 分发入口时按两阶段执行：
 
 #### 步骤 ② `precheck-app-review`
 
-传入完全相同的 `release_schedule`。`precheck-app-review` 返回 `blockers` 非空 或 `preaudit_passed === false` 时，向用户逐项展示 `blockers`（服务端报告的阻断原因，提交时仍由服务端校验）与 `warnings`（风险提示），并询问是否继续。预检是**可跳过**的：用户明确「强制提交」时允许进入步骤 ③ 执行 `submit-app-review`，由服务端做最终校验裁决；未明确时建议先修复 `blockers`。
+传入完全相同的 `release_schedule`。先按本节的返回表判定：`blockers` 非空、或 `preaudit_status === "rejected"` 时，向用户逐项展示 `blockers`（服务端报告的阻断原因，提交时仍由服务端校验）与 `warnings`（风险提示），并询问是否继续；`preaudit_status === "unavailable"` 走下面「没审成」的分支，不要当成卡点、也不要建议改资料。预检是**可跳过**的：用户明确「强制提交」时允许进入步骤 ③ 执行 `submit-app-review`，由服务端做最终校验裁决；未明确时建议先修复 `blockers`。
 
-向用户展示预检结果时保留业务语义，不直接回显字段名或布尔值。正式预检通过（`preaudit_passed === true`）、且没有阻断项（`blockers` 为空）时，固定输出：
+向用户展示预检结果时保留业务语义，不直接回显字段名或布尔值。正式预检通过（`preaudit_status === "passed"`）、且没有阻断项（`blockers` 为空）时，固定输出：
 
 - 阻塞项：无
 - 提交状态：可提交审核
 
-`preaudit_passed === false`（机审未通过）且本次 `blockers` 明确为空时，仍输出「阻塞项：无」「提交状态：可提交审核」，但**必须同时说明「内容预审未通过：不阻断提交，但提交后可能被审核驳回」**并逐项展示 `PREAUDIT` warnings——「可提交」与「机审未过」两者要同时说清，不能只报其一。
+`preaudit_status === "rejected"`（机审未通过）且本次 `blockers` 明确为空时，仍输出「阻塞项：无」「提交状态：可提交审核」，但**必须同时说明「内容预审未通过：不阻断提交，但提交后可能被审核驳回」**并逐项展示 `PREAUDIT` warnings——「可提交」与「机审未过」两者要同时说清，不能只报其一。
+
+`preaudit_status === "unavailable"`（机审服务暂时不可用，本次没得出预审结论；此时 `preaudit_passed` 为 `false`）**既不是「未通过」，也不是阻断项**：告诉用户本次预检没跑成，并给出两个选项——稍后重试 `precheck-app-review`，或直接提交（提交后仍会走内容审核）；展示 `PREAUDIT_UNAVAILABLE` 时不得表述成「内容预审未通过」，也不得因此要求用户修改资料。若本次 `blockers` 非空，仍按阻断项处理。
+
+取值不在上述三态内（未来新增或拼写异常）时按「没有结论」处理：既不当作 `passed`，也不当作阻断项。
+
+若响应里没有 `preaudit_status`（旧服务端），退回按 `preaudit_passed` 判断：`true` 视为已通过；`false` 且 `blockers` 为空时按「机审未通过」处理，不要自行当成「没审成」。
 
 `preaudit_passed` 只用于内部流程判断，不得向用户原样输出 `Blocker`、`preaudit_passed=true` 等机器字段。存在阻断项时，逐项展示服务端返回的阻断原因，不得输出“可提交审核”；用户明确「强制提交」时说明提交可能被服务端拒绝，允许继续。
 
 | 返回 | 含义 | 处理 |
 | --- | --- | --- |
 | `blockers` 非空 | 存在阻断项 | 逐项展示阻断原因及提交可能被拒绝的风险，询问是否「强制提交」；用户确认时允许进入步骤 ③ |
-| `preaudit_passed === false` | 机审未通过 | 展示 `PREAUDIT` warnings，说明「不阻断提交，但提交后可能被审核驳回」；询问是否继续 |
+| `preaudit_status === "rejected"` | 机审未通过 | 展示 `PREAUDIT` warnings，说明「不阻断提交，但提交后可能被审核驳回」；询问是否继续 |
+| `preaudit_status === "unavailable"` | 机审没跑成，没有结论 | 展示 `PREAUDIT_UNAVAILABLE`，说明「本次预检未得出结论，可稍后重试预检，也可直接提交（提交后仍会审核）」；不要求修改资料 |
 | `warnings` 非空 | 有风险提示 | 展示 `warnings`，询问"是否继续提交？" |
-| `preaudit_passed === true` 且 `blockers` 为空 | 可提交 | 等待最终提交确认 |
+| `preaudit_status === "passed"` 且 `blockers` 为空 | 可提交 | 等待最终提交确认 |
 | `version_id` 与步骤 ① 不一致 | 复核后版本已变化 | 回到步骤 ①重新生成快照并复核，禁止沿用旧快照 |
 | 顶层 `ok: false` | 工具失败 | 按 `error.type` / `error.subtype` 告知失败，停止；业务成功或状态读取当前 operation 已声明字段 |
 
 #### 步骤 ③ `submit-app-review`
 
-步骤 ② 预检是**可跳过**的：`preaudit_passed === true` 且 `blockers` 为空时可直接提交；否则向用户展示卡点后，用户明确「强制提交」仍可进入本步执行 `submit-app-review`，最终由提交接口按当前状态校验裁决。预检调用成功不代表内容通过；字段缺失或预检执行失败时标记未确认，不伪造通过结果。
+步骤 ② 预检是**可跳过**的：`preaudit_status === "passed"` 且 `blockers` 为空时可直接提交；否则向用户展示卡点后，用户明确「强制提交」仍可进入本步执行 `submit-app-review`，最终由提交接口按当前状态校验裁决。`preaudit_status === "unavailable"` 时预检没有结论，重试预检还是直接提交由用户选择，不要自行卡住流程。预检调用成功不代表内容通过；字段缺失或预检执行失败时标记未确认，不伪造通过结果。
 
 参数：
 
