@@ -5,7 +5,7 @@
   if(!api?.runtime?.id)return;
   const brandURL=api.runtime.getURL('icons/48.png'),lifecycle=new AbortController();
   globalThis.__cindyReading=true;
-  let disposed=false,navigationTimer,selectionPreferenceChanged=false;
+  let disposed=false,navigationTimer,selectionPreferenceRevision=0;
   function runtimeReady(){if(disposed)return false;if(!api?.runtime?.id||typeof api.runtime.sendMessage!=='function'){dispose();return false;}return true;}
   async function extensionCall(fn){
     // Defer even synchronous API access so callers can catch invalid contexts.
@@ -45,10 +45,12 @@
   async function configure(){
     if(configuring)return configuring;
     configuring=(async()=>{const r=await request({op:'config'});subtitleSegmentation=r.features?.includes('subtitle-segmentation-v1')===true;subtitleEditorial=r.features?.includes('subtitle-editorial-v1')===true;subtitleCacheSupported=r.features?.includes('subtitle-cache-v1')===true;expandedLanguages=r.features?.includes('language-target-v1')===true;locale=r.locale||'en';t=U.copy(locale);
+      const selectionRevision=selectionPreferenceRevision;
       const stored=(await extensionCall(()=>api.storage.local.get('cindyReadingPreferences'))).cindyReadingPreferences||{};
       const legacy=stored.webTarget?{}:await request({op:'preferences'});
+      const selectionButtonEnabled=selectionRevision===selectionPreferenceRevision?stored.selectionButton===true:prefs.selectionButton;
       target=L.validTarget(stored.webTarget)?stored.webTarget:L.validTarget(legacy.target)?legacy.target:'zh-CN';
-      prefs={selectionButton:stored.selectionButton===true,webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:['both','translation','original','off'].includes(stored.videoMode)?stored.videoMode:'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause!==false,autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{},theme:['light','dark'].includes(stored.theme)?stored.theme:null};
+      prefs={selectionButton:selectionButtonEnabled,webTarget:target,videoTarget:L.validTarget(stored.videoTarget)?stored.videoTarget:target,videoMode:['both','translation','original','off'].includes(stored.videoMode)?stored.videoMode:'both',videoSize:['small','medium','large'].includes(stored.videoSize)?stored.videoSize:'medium',autoVideo:stored.autoVideo!==false,bufferPause:stored.bufferPause!==false,autoSites:stored.autoSites&&typeof stored.autoSites==='object'?stored.autoSites:{},theme:['light','dark'].includes(stored.theme)?stored.theme:null};
     })();try{await configuring;}finally{configuring=null;}
   }
   let preferenceSave=Promise.resolve();
@@ -109,10 +111,10 @@
     prefs.videoTarget=nextVideoTarget;
     prefs.videoMode=['both','translation','original','off'].includes(stored.videoMode)?stored.videoMode:prefs.videoMode;
     prefs.videoSize=['small','medium','large'].includes(stored.videoSize)?stored.videoSize:prefs.videoSize;
-    selectionPreferenceChanged=true;
+    selectionPreferenceRevision++;
     prefs.selectionButton=stored.selectionButton===true;
     if(!prefs.selectionButton){selectionButton?.remove();selectionButton=null;}
-    const checkbox=shadow?.querySelector('.selection-button-checkbox');if(checkbox)checkbox.checked=prefs.selectionButton;
+    const checkbox=body?.querySelector('.selection-button-checkbox');if(checkbox)checkbox.checked=prefs.selectionButton;
     prefs.bufferPause=stored.bufferPause!==false;
     prefs.theme=['light','dark'].includes(stored.theme)?stored.theme:null;
     prefs.autoVideo=stored.autoVideo!==false;
@@ -448,7 +450,8 @@
   }
   function download(text,name){const u=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),a=el('a');a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);}
   let selectionButton, selectionStart, selectionDragged=false;
-  extensionCall(()=>api.storage.local.get('cindyReadingPreferences')).then(data=>{if(!selectionPreferenceChanged)prefs.selectionButton=data.cindyReadingPreferences?.selectionButton===true;}).catch(()=>{});
+  const selectionStartupRevision=selectionPreferenceRevision;
+  extensionCall(()=>api.storage.local.get('cindyReadingPreferences')).then(data=>{if(selectionStartupRevision===selectionPreferenceRevision)prefs.selectionButton=data.cindyReadingPreferences?.selectionButton===true;}).catch(()=>{});
   const selectionEventIsOurs=e=>e.composedPath().includes(host)||e.composedPath().some(n=>n instanceof Element&&n.hasAttribute('data-cindy-captions'));
   document.addEventListener('mousedown',e=>{
     if(!e.isTrusted||e.button!==0||selectionEventIsOurs(e))return;

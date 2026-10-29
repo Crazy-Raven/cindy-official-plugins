@@ -10,7 +10,7 @@ function fixture(send=async()=>({enabled:false}),preferences={}){
     constructor(){super();nodes.push(this);this.handlers={};this.attrs={};this.children=[];this.className='';this.isConnected=true;this.style={props:Object.create(null),setProperty(k,v){this.props[k]=v;},getPropertyValue(k){return this.props[k]||'';},removeProperty(k){delete this.props[k];}};}
     dataset={};textContent='';
     addEventListener(name,fn){this.handlers[name]=fn;super.addEventListener(name,fn);}
-    append(...items){this.children.push(...items);for(const n of items)n.isConnected=true;}
+    append(...items){for(const n of items){if(n.parentNode)n.parentNode.children=n.parentNode.children.filter(child=>child!==n);this.children.push(n);n.parentNode=this;n.isConnected=true;}}
     setAttribute(k,v){this.attrs[k]=v;} remove(){this.isConnected=false;} attachShadow(){return new Node();}
     querySelector(sel){
       if(typeof sel==='string'&&sel.startsWith('.')){
@@ -84,6 +84,40 @@ test('a late startup preference read cannot undo a newer storage change',async()
   f.setPreferences({selectionButton:false});
   resolveRead({cindyReadingPreferences:{selectionButton:true}});await settle();
   dragSelection(f);assert.equal(visibleSelectionButtons(f).length,0);
+});
+
+test('configure keeps a newer selection setting while legacy preferences are pending',async()=>{
+  let resolveLegacy;
+  const f=fixture(m=>m.request?.op==='preferences'?new Promise(resolve=>{resolveLegacy=resolve;}):Promise.resolve({ok:true,enabled:false}),{selectionButton:true});
+  await settle();const replies=[];
+  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},r=>replies.push(r));
+  await settle();assert.equal(typeof resolveLegacy,'function');
+  f.setPreferences({selectionButton:false});
+  resolveLegacy({ok:true,target:'zh-CN'});await settle();await settle();
+  assert.equal(replies[0]?.ok,true);
+  assert.equal(f.nodes.findLast(n=>n.type==='checkbox').checked,false);
+  dragSelection(f);assert.equal(visibleSelectionButtons(f).length,0);
+});
+
+test('configure preserves a saved selection setting when no update intervenes',async()=>{
+  const f=fixture(async()=>({ok:true,enabled:false}),{selectionButton:true});await settle();
+  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},()=>{});
+  await settle();await settle();
+  assert.equal(f.nodes.findLast(n=>n.type==='checkbox').checked,true);
+  dragSelection(f);assert.equal(visibleSelectionButtons(f).length,1);
+});
+
+test('selection checkbox synchronizes after its settings body moves into the player shadow root',async()=>{
+  const f=fixture(async()=>({ok:true,enabled:false}),{selectionButton:false});await settle();
+  [...f.listeners][0]({type:'cindy-ui',action:'settings'},{id:'fixture'},()=>{});
+  await settle();await settle();
+  const checkbox=f.nodes.findLast(n=>n.type==='checkbox'),settingsBody=checkbox.parentNode.parentNode;
+  const originalParent=settingsBody.parentNode;
+  const playerRoot=f.context.document.createElement('div').attachShadow({mode:'closed'});
+  playerRoot.append(settingsBody);
+  assert.equal(originalParent.querySelector('.selection-button-checkbox'),null);
+  f.setPreferences({selectionButton:true});assert.equal(checkbox.checked,true);
+  f.setPreferences({selectionButton:false});assert.equal(checkbox.checked,false);
 });
 test('a reloaded extension leaves no URL polling or page listeners after runtime disappears',async()=>{
   const f=fixture();await settle();const tick=[...f.timers.values()][0];
