@@ -631,11 +631,12 @@ test('Android discovery never turns unreadable runtime evidence into a stopped d
   });
 });
 test('Android discovery tolerates only real absence and rejects unreadable post-shutdown evidence',async t=>{
-  for(const phase of ['missing-directory','missing-record','dead-pid','after-shutdown'])await t.test(phase,async t=>{
+  for(const phase of ['missing-directory','missing-record','dead-pid','after-shutdown','after-shutdown-pid'])await t.test(phase,async t=>{
     const {devices,d}=await privateAndroid(t),list=fs.readdir,read=fs.readFile,kill=process.kill,name='pid_'+process.pid+'.ini';let stopped=false;
     const endpoint=await emulator(t,s=>{stopped=true;send(s,'Empty',{});});
     t.mock.method(fs,'readdir',async(dir,...args)=>{
       if(String(dir).endsWith(path.join('avd','running'))){
+        if(stopped&&phase==='after-shutdown-pid')return [];
         if(phase==='missing-directory'||stopped)throw Object.assign(Error('discovery '+phase),{code:stopped?'EACCES':'ENOENT'});
         return [name];
       }
@@ -646,9 +647,9 @@ test('Android discovery tolerates only real absence and rejects unreadable post-
       if(phase==='missing-record')throw Object.assign(Error('record gone'),{code:'ENOENT'});
       return `avd.id=${d.avdName}\navd.dir=${d.directory}\ngrpc.port=${endpoint.port}\ngrpc.token=test-capability\nport.serial=5554\n`;
     });
-    t.mock.method(process,'kill',(pid,signal)=>{if(phase==='dead-pid'&&pid===process.pid&&signal===0)throw Object.assign(Error('pid gone'),{code:'ESRCH'});return kill(pid,signal);});
-    if(phase==='after-shutdown'){
-      const result=await devices.manage('delete_device',{udid:d.udid});assert.equal(stopped,true);assert.equal(result.execution,'unknown');assert.equal(result.deviceError.code,'EACCES');assert.deepEqual(result.completedSteps,[]);assert.equal(await devices.owns(d.udid),true);
+    t.mock.method(process,'kill',(pid,signal)=>{if(pid===process.pid&&signal===0){if(phase==='dead-pid')throw Object.assign(Error('pid gone'),{code:'ESRCH'});if(stopped&&phase==='after-shutdown-pid')throw Object.assign(Error('pid unreadable'),{code:'EPERM'});}return kill(pid,signal);});
+    if(phase.startsWith('after-shutdown')){
+      const result=await devices.manage('delete_device',{udid:d.udid});assert.equal(stopped,true);assert.equal(result.execution,'unknown');assert.equal(result.deviceError.code,phase==='after-shutdown-pid'?'EPERM':'EACCES');assert.deepEqual(result.completedSteps,[]);assert.equal(await devices.owns(d.udid),true);
       assert.equal(await fs.readFile(path.join(d.directory,'one.img'),'utf8'),'one');
     }else {assert.equal((await devices.devices())[0].state,'Shutdown');assert.equal((await devices.shutdown({udid:d.udid})).execution,'not_executed');}
   });
@@ -686,6 +687,7 @@ test('device removal reports each completed step and preserves records when a la
 test('a completed shutdown remains visible when the subsequent AVD listing fails',async t=>{
   const {devices,d}=await privateAndroid(t);let running=true;
   const endpoint=await emulator(t,s=>{running=false;send(s,'Empty',{});}),name='pid_'+process.pid+'.ini',read=fs.readFile,list=fs.readdir;
+  const kill=process.kill;t.mock.method(process,'kill',(pid,signal)=>{if(pid===process.pid&&signal===0&&!running)throw Object.assign(Error('pid gone'),{code:'ESRCH'});return kill(pid,signal);});
   t.mock.method(fs,'readFile',async(file,...args)=>path.basename(String(file))===name?`avd.id=${d.avdName}\navd.dir=${d.directory}\ngrpc.port=${endpoint.port}\ngrpc.token=test-capability\nport.serial=5554\n`:read(file,...args));
   const spy=t.mock.method(fs,'readdir',async(dir,...args)=>{
     if(String(dir).endsWith(path.join('avd','running')))return running?[name]:[];
@@ -751,6 +753,45 @@ test('successful device removal/erase and App launch still produce confirmed out
     const result=await apps.launch({udid:id},{bundleId:'test.example',relaunch});assert.equal(result.appLaunched,true);assert.equal(result.appTerminated,relaunch);assert.equal(result.execution,'executed');
     assert.equal(calls.some(args=>args.includes('force-stop')),relaunch);
   }
+});
+for(const rediscovered of [false,true])test('Android audio waits for the old process before restarting: '+(rediscovered?'previous worker':'current worker'),async t=>{
+  const root=await temp(t),runtime='android:android-36:google_apis:arm64-v8a',launches=[];
+  const {EventEmitter}=require('node:events');let d,child,running=false,exiting=false;
+  const endpoint=await emulator(t,(s,h)=>{
+    assert.equal(h[':path'].split('/').at(-1),'setVmState');running=false;exiting=true;
+    const old=child;setTimeout(()=>{exiting=false;old.exitCode=0;old.emit('exit',0);},350);
+    send(s,'Empty',{});
+  });
+  const name='pid_'+process.pid+'.ini',list=fs.readdir,read=fs.readFile;
+  const kill=process.kill;t.mock.method(process,'kill',(pid,signal)=>{if(pid===process.pid&&signal===0&&!running&&!exiting)throw Object.assign(Error('pid gone'),{code:'ESRCH'});return kill(pid,signal);});
+  t.mock.method(fs,'readdir',async(dir,...args)=>String(dir).endsWith(path.join('avd','running'))?(running?[name]:[]):list(dir,...args));
+  t.mock.method(fs,'readFile',async(file,...args)=>path.basename(String(file))===name?`avd.id=${d.avdName}\navd.dir=${d.directory}\ngrpc.port=${endpoint.port}\ngrpc.token=test-capability\nport.serial=5554\n`:read(file,...args));
+  const sdk={inspect:async()=>({ready:true,emulator:path.join(root,'sdk/emulator/emulator'),adb:path.join(root,'sdk/platform-tools/adb'),images:[{identifier:runtime,directory:path.join(root,'image'),abi:'arm64-v8a',version:'36'}]})};
+  const run=async(_file,args)=>({stdout:args.includes('emu')?d.avdName:'1'});
+  const spawn=(_file,args)=>{
+    assert.equal(exiting,false,'the previous QEMU must release its AVD before another launch');
+    launches.push(args);running=true;child=new EventEmitter();child.exitCode=null;return child;
+  };
+  const options={root,sdk,run,children:new Set(),spawn};
+  let devices=require(path.join(A,'devices.cjs')).createDevices(options);
+  const {udid}=await devices.create({name:'Audio fixture',runtime,deviceType:'android:phone'});d=await devices.target({udid},false);
+  await devices.boot({udid});assert.equal(launches[0].includes('-no-audio'),true);
+  if(rediscovered)devices=require(path.join(A,'devices.cjs')).createDevices({...options,children:new Set()});
+  assert.equal((await devices.audio({udid})).enabled,false);
+  await assert.rejects(devices.audio({udid,audioEnabled:'true'}),e=>e.code==='INVALID_ARGUMENT');
+  await assert.rejects(devices.audio({udid,audioEnabled:true}),e=>e.code==='AUDIO_RESTART_REQUIRED'&&e.execution==='not_executed');
+  assert.equal(launches.length,1,'query and rejected changes never restart');
+  for(const enabled of [true,false]){
+    const result=await devices.audio({udid,audioEnabled:enabled,restart:true});
+    assert.equal(result.enabled,enabled);assert.equal(result.restarted,true);assert.equal(result.appTerminated,true);
+    assert.equal(launches.at(-1).includes('-no-audio'),!enabled);
+    const config=await fs.readFile(path.join(d.directory,'config.ini'),'utf8');
+    assert.match(config,/hw.audioInput=no/);assert.ok(config.includes('hw.audioOutput='+(enabled?'yes':'no')));
+  }
+  assert.equal(launches.length,3);
+  assert.equal((await devices.audio({udid,audioEnabled:false,restart:true})).execution,'not_executed');
+  assert.equal(launches.length,3,'an unchanged setting never restarts');
+  await devices.shutdown({udid});
 });
 test('Android boots on the host GPU, falls back once, and aligns the adb key first',async t=>{
   const root=await temp(t),runtime='android:android-36:google_apis:arm64-v8a',userHome=path.join(root,'user-android'),previous=process.env.ANDROID_USER_HOME;

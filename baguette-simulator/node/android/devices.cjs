@@ -12,6 +12,7 @@ const MODELS=[
   {identifier:'android:tablet',name:'Android Tablet',platform:'android',width:1600,height:2560,density:320},
 ];
 function ini(raw){return Object.fromEntries(raw.split(/\r?\n/).map(l=>/^\s*([^#;=]+?)\s*=\s*(.*?)\s*$/.exec(l)).filter(Boolean).map(m=>[m[1],m[2]]));}
+function processAlive(pid){try{process.kill(pid,0);return true;}catch(e){if(e.code==='ESRCH')return false;throw e;}}
 async function freePort(){return new Promise((resolve,reject)=>{const s=net.createServer();s.on('error',reject);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});}
 // adb keeps its signing key in the user's Android directory. The emulator
 // injects the key from ANDROID_EMULATOR_HOME, copying the adb key only when
@@ -49,7 +50,7 @@ function createDevices({root,sdk,run,children,spawn:launchProcess=spawn}){
         if(!/^pid_\d+(?:_info)?\.ini$/.test(name))continue;
         const info=ini(await fs.readFile(path.join(directory,name),'utf8').catch(e=>{if(e.code==='ENOENT')return '';throw e;}));
         if(info['avd.id']!==device.avdName||path.resolve(info['avd.dir']||'')!==path.resolve(device.directory))continue;
-        const pid=Number(name.match(/\d+/)[0]);try{process.kill(pid,0);}catch(e){if(e.code==='ESRCH')continue;throw e;}
+        const pid=Number(name.match(/\d+/)[0]);if(!processAlive(pid))continue;
         const port=Number(info['grpc.port']),serial=Number(info['port.serial']);
         if(!Number.isInteger(port)||port<1024||port>65535||!Number.isInteger(serial)||serial<5554||serial>5682||!info['grpc.token'])throw fail('DEVICE_DISCOVERY_UNCONFIRMED','The running private Android device has an invalid connection record. Inspect its state before changing this device.');
         return {port,token:info['grpc.token'],serial:`emulator-${serial}`,pid};
@@ -109,16 +110,21 @@ function createDevices({root,sdk,run,children,spawn:launchProcess=spawn}){
     return {udid,name,runtime:p.runtime,platform:'android',execution:'executed'};
   }
   async function boot(p){
+    if(p.audioEnabled!==undefined&&typeof p.audioEnabled!=='boolean')throw fail('INVALID_ARGUMENT','audioEnabled 必须为 true 或 false。');
     const d=await target(p,false),local=await sdk.inspect();let ep=d.endpoint;
+    if(ep&&p.audioEnabled!==undefined&&(await audioStatus(d)).enabled!==p.audioEnabled)throw fail('AUDIO_RESTART_REQUIRED','改变安卓电脑声音需要重启设备。确认 App 可以退出后，使用 device action=audio restart=true。');
     if(!local.ready)throw fail('ANDROID_SETUP_REQUIRED','Open simulator setup to install the Android environment.');
     let started=false,gpu=null;
     const launch=async mode=>{
+      const configPath=path.join(d.directory,'config.ini'),config=ini(await fs.readFile(configPath,'utf8'));
+      config['hw.audioInput']='no';config['hw.audioOutput']=p.audioEnabled===true?'yes':'no';
+      await fs.writeFile(configPath,Object.entries(config).map(([k,v])=>`${k}=${v}`).join('\n')+'\n',{mode:0o600});
       const port=await freePort(),logs=await fs.open(path.join(d.directory,'emulator.log'),'w',0o600);
       const env={...process.env,ANDROID_AVD_HOME:avds,ANDROID_EMULATOR_HOME:root,ANDROID_HOME:path.dirname(path.dirname(local.emulator)),ANDROID_SDK_ROOT:path.dirname(path.dirname(local.emulator))};
       // Headless `-gpu auto` selects SwiftShader/lavapipe, which renders on
       // about eleven CPU cores while the screen moves. Host GPU is the
       // default; `auto` remains the fallback when the host GPU cannot start.
-      const child=launchProcess(local.emulator,['-avd',d.avdName,'-no-window','-gpu',mode,'-no-boot-anim','-no-snapshot','-no-audio','-grpc',String(port),'-grpc-use-token','-no-metrics','-camera-back','none','-camera-front','none'],{env,stdio:['ignore',logs.fd,logs.fd],windowsHide:true});
+      const child=launchProcess(local.emulator,['-avd',d.avdName,'-no-window','-gpu',mode,'-no-boot-anim','-no-snapshot',...(p.audioEnabled===true?[]:['-no-audio']),'-grpc',String(port),'-grpc-use-token','-no-metrics','-camera-back','none','-camera-front','none'],{env,stdio:['ignore',logs.fd,logs.fd],windowsHide:true});
       children.add(child);processes.set(d.udid,child);started=true;gpu=mode;
       child.on('error',()=>{if(processes.get(d.udid)===child)processes.delete(d.udid);children.delete(child);});child.on('exit',()=>{if(processes.get(d.udid)===child)processes.delete(d.udid);children.delete(child);});
       try{await logs.close();}catch(e){e.execution='unknown';throw e;}
@@ -155,8 +161,26 @@ function createDevices({root,sdk,run,children,spawn:launchProcess=spawn}){
       }catch(e){e.execution='unknown';throw e;}
     }
     try{await rpc(d.endpoint,'setVmState',{state:5},{deadline:Date.now()+10000});}catch{/* Shutdown closes its own connection; confirm below. */}
-    const until=Date.now()+30000;while(Date.now()<until){try{if(!await endpoint(d))return {udid:d.udid,state:'Shutdown',execution:'executed'};}catch(e){e.execution='unknown';throw e;}await sleep(250);}
+    // Discovery can disappear before QEMU exits and releases the AVD lock.
+    // Also wait for rediscovered processes inherited from a previous worker.
+    const until=Date.now()+30000;while(Date.now()<until){try{if(!await endpoint(d)&&!processes.has(d.udid)&&!processAlive(d.endpoint.pid))return {udid:d.udid,state:'Shutdown',execution:'executed'};}catch(e){e.execution='unknown';throw e;}await sleep(250);}
     throw fail('STOP_UNCONFIRMED','Android shutdown was requested but has not completed. Refresh device state.','unknown');
+  }
+  async function audioStatus(d){
+    const config=ini(await fs.readFile(path.join(d.directory,'config.ini'),'utf8'));
+    return {enabled:config['hw.audioOutput']==='yes',restartRequired:true};
+  }
+  async function audio(p){
+    const d=await target(p),current=await audioStatus(d);
+    if(p.audioEnabled===undefined)return {udid:d.udid,...current};
+    if(typeof p.audioEnabled!=='boolean')throw fail('INVALID_ARGUMENT','audioEnabled 必须为 true 或 false。');
+    if(current.enabled===p.audioEnabled)return {udid:d.udid,...current,execution:'not_executed'};
+    if(p.restart!==true)throw fail('AUDIO_RESTART_REQUIRED','改变安卓电脑声音需要重启设备并退出 App。获得用户同意后，使用 restart=true。');
+    await shutdown(p);
+    try {
+      const result=await boot(p);
+      return {udid:d.udid,...await audioStatus(d),state:result.state,restarted:true,appTerminated:true,execution:'executed'};
+    }catch(error){error.execution='unknown';error.message='设备已关闭，重新启动未完成；请先检查 devices，不要重复重启。'+error.message;throw error;}
   }
   async function manage(method,p){
     const d=await target(p,false);
@@ -183,6 +207,6 @@ function createDevices({root,sdk,run,children,spawn:launchProcess=spawn}){
       return {udid:d.udid,outcome:'partial',execution:writeStarted||stopped?.execution==='executed'?'unknown':e.execution||'not_executed',completedSteps,failedStep,...(entry?{entry}:{}),...(stopped?{shutdown:stopped}:{}),deviceError:{code:e.code||'DEVICE_CHANGE_FAILED',message:e.message,execution:e.execution||'unknown'},nextAction:'Inspect this private device and the completed steps before continuing; do not blindly repeat deletion or erasure.'};
     }
   }
-  return {devices,target,adb,create,boot,shutdown,manage,endpoint,owns:id=>UUID.test(id||'')?fs.access(file(id)).then(()=>true,()=>false):Promise.resolve(false),models:MODELS};
+  return {devices,target,adb,create,boot,shutdown,manage,endpoint,audio,owns:id=>UUID.test(id||'')?fs.access(file(id)).then(()=>true,()=>false):Promise.resolve(false),models:MODELS};
 }
 module.exports={createDevices,MODELS,ini};
