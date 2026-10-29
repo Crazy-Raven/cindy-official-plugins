@@ -66,7 +66,7 @@
 | 用户意图 | 读手册 | 起手动作 |
 | --- | --- | --- |
 | 查询能力、查看某域有哪些操作 | 本手册 | `list_tools()` 看顶层命令,再用 `list_tools(category:"<命令路径>")` 逐层下钻;不确定名字时传前缀搜索 |
-| 登录、当前身份、找 developerId/appId | `identity` | 已有 ID 不重复查;否则查候选 |
+| 登录、当前身份、找 developerId/appId | `identity` | 已有适用的调用 scope 不重复查；先区分目标资源 ID，否则查候选 |
 | 创建新游戏、选择游戏类型或包体方向 | `app-edit`(新游戏创建一节) | 先收集并确认创建字段 |
 | 改资料、素材、主包体、整版提审/撤审/发布 | `app-edit` | 先 read-before-write |
 | 上传本地图片、视频或包体(单个文件或目录/zip 盘点) | `materials`(第一部分) | 先盘点和确认用途,再逐项上传和交接 |
@@ -90,7 +90,7 @@
 ## 执行规则
 
 - 判断请求是否属于 TapTap 开发者后台;不是就不要强行套插件。复杂流程和写操作先读 references 里的 shared execution。
-- 缺 `developerId` / `appId` 时转 `identity` 手册;多候选让用户选择,不猜 ID,也不复用可能过期的历史 ID。交接调用显式带 `dev_id` 和 `app_id`。
+- 先区分调用 scope 与目标资源 ID；跨论坛列表的目标 App 使用 `args.data.forum_app_id`，`args.developer_id` / `args.app_id` 仍用已确认可用的厂商与游戏，详见 [社区管理](taptap-suite/references/taptap-community-management/MANUAL.md)。缺调用 scope 时转 `identity` 手册；多候选让用户选择，不猜 ID，也不复用可能过期的历史 ID。交接调用显式带 `developer_id` 和 `app_id`。
 - 发现命令:`list_tools()` 给顶层命令;`list_tools(category:"<命令路径>")` 下钻某个服务的操作(如 `"asset-library"`);传一个没有子命令的命令路径会返回它接受的 flag。不确定命令名时直接传前缀搜索(如 `category:"up"`)。
 - 参数不确定时先查目录:`list_tools` 下钻返回 schema 操作的参数 schema 与 use_when/avoid_when;也可以 `call_tool(name:"schema", args:{_positional:["<service>","<method>"]})` 查单个操作的完整输入输出,或对任意命令传 `args._help:true` 查看完整帮助。不猜字段或枚举。
 - 优先使用目录已列出的操作;当前能力缺失时说明 CLI 暂不支持,并给可执行替代路径。

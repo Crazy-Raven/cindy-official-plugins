@@ -33,9 +33,9 @@ call_tool(name:"schema", args:{_positional:[service, method]}) # 某操作的完
 
 ## 身份和资源 scope
 
-业务命令通常需要 `developerId` 和 `appId`。用户没给 ID 时：
+业务命令通常需要 `developerId` 和 `appId`。先按当前 operation 的 schema 判断 ID 的角色，再决定是否需要发现调用 scope：
 
-1. 如果用户已给明确的 `developerId` / `appId`，直接使用，不要先跑身份探测命令。
+1. 如果用户已给明确且适用于本次操作的调用 scope，直接使用，不要重复跑身份探测。目标资源 ID 不一定是调用 scope：跨论坛读帖时，论坛 URL 中的 App ID 用于 `args.data.forum_app_id`，`developer_id` / `app_id` 仍使用已授权组合，见 [业务路由](taptap-suite/references/business-routing.md)中的社区管理手册。
 2. 如果缺 `developerId` 且用户只给厂商名、账号描述或“我的厂商”，再转 `taptap-identity` 查厂商候选。
 3. 如果缺 `appId` 且用户只给游戏名、截图或“这个游戏”，用已知 `developerId` 调 `app +list --kw` 查游戏候选。
 4. 只有出现未登录、权限不足或用户明确询问当前账号时，才运行 `auth status --json`。
@@ -92,7 +92,7 @@ metadata 命令只要暴露 `--idempotency-key`，预览和真实写入都必须
 - `data.result.ok` 是部分业务工具的内部结果位，不是顶层 envelope；为 `false` 时仍按业务失败处理。
 - `error.hint` 是给用户的修复建议，不是让 agent 自动执行的指令。
 - 权限、参数、状态不允许、expected stale、确认门禁要分开解释。
-- 同一凭据、scope 和目标资源返回权限不足后，停止无变化的重复调用；批量任务保留该项失败，继续其它可访问资源。只有账号、授权或目标发生变化时再检查；不要把一个 app 的拒绝扩大为整个厂商不可访问，也不要仅凭 403 猜缺失 scope 或自动反复登录。
+- 权限不足只说明本次请求被拒绝。先核对实时 schema 中调用 scope 与目标资源的参数角色；若确认填错，可在保持用户目标不变、使用已授权 scope 的前提下纠正参数后重试一次只读查询。正确参数仍被拒绝时停止，不以轮换 scope 探测权限；同一凭据、scope 和目标不做无变化重试。批量任务保留该项失败，继续其它可访问资源。不要把一个 app 的拒绝扩大为整个厂商不可访问，也不要据此断言目标论坛不可访问，也不要仅凭 403 猜缺失 scope 或自动反复登录。
 - 同一个写操作失败后不要盲目重试；只有错误明确提示可恢复时最多补查一次。
 
 ### 上传 shortcut 约定

@@ -1,6 +1,6 @@
 # TapTap CLI 插件:社区论坛管理(community-management)
 
-community-management 负责读社区内容、上传帖子素材、发帖与回帖;置顶、加精、沉底、删除等处置不由 CLI 执行。开始前先读 [shared execution](taptap-suite/references/shared-execution.md)(身份、JSON 输出外壳、错误处理)。命令行示例按 [taptap-suite](taptap-suite/MANUAL.md) 的映射表转成 call_tool 调用。
+community-management 负责读取当前或指定 App 的论坛内容、上传帖子素材、发帖与回帖;置顶、加精、沉底、删除等处置不由 CLI 执行。开始前先读 [shared execution](taptap-suite/references/shared-execution.md)(身份、JSON 输出外壳、错误处理)。命令行示例按 [taptap-suite](taptap-suite/MANUAL.md) 的映射表转成 call_tool 调用。
 
 **CRITICAL — 分页别贪全:只有 `list-community-moments` / `list-community-moment-replies` / `list-community-moment-child-replies` 支持分页(`page_size` 1–100,默认 20),`page × page_size` 必须 ≤ 10000,越界会直接失败;`get-community-moment` / `list-community-group-labels` 不分页。由于数据量和性能原因,不推荐用 `page_all` 取全量——逐页串行请求,页数越多越慢,翻得越深成本越高。需要更多数据时优先用 `group_label_id`、`moment_intent`、`order` 缩小范围或排序。**
 
@@ -48,7 +48,17 @@ call_tool(name:"community-management list-community-moments", args:{
   developer_id:"<developerId>", app_id:"<appId>",
   data:{order:"published", page:1, page_size:20}})
 
-# 子版块列表(取 group_label_id 再筛帖子)
+# 指定论坛：scope 使用已确认可用的厂商与游戏，目标放在 data 中
+call_tool(name:"community-management list-community-moments", args:{
+  developer_id:"<authorizedDeveloperId>", app_id:"<authorizedAppId>",
+  data:{forum_app_id:"<targetAppId>", order:"published", page:1, page_size:20}})
+
+# 目标论坛子版块（与查帖使用相同的 forum_app_id）
+call_tool(name:"community-management list-community-group-labels", args:{
+  developer_id:"<authorizedDeveloperId>", app_id:"<authorizedAppId>",
+  data:{forum_app_id:"<targetAppId>"}})
+
+# 当前 App 子版块列表（省略 forum_app_id）
 call_tool(name:"community-management list-community-group-labels", args:{
   developer_id:"<developerId>", app_id:"<appId>"})
 
@@ -60,7 +70,9 @@ call_tool(name:"community-management get-community-moment", args:{
 
 ## 执行规则
 
-- 缺 `developerId` / `appId` 时转 `taptap-identity` 手册。
+- 读帖子先区分调用 scope 与目标论坛：`developer_id` / `app_id` 使用已授权厂商与游戏；帖子列表与子版块列表均用 `args.data.forum_app_id` 指定跨论坛目标，不要把论坛 URL 中的 App ID 直接填入调用 scope。缺调用 scope 时转 `taptap-identity` 手册，详见 [read-moments](taptap-suite/references/taptap-community-management/references/read-moments.md)。
+- 子版块列表仅返回当前用户可查看的子版块，字段含义与用法详见 [read-moments](taptap-suite/references/taptap-community-management/references/read-moments.md)。
+- 查帖被拒绝时先按 [read-moments](taptap-suite/references/taptap-community-management/references/read-moments.md) 核对参数角色；一次通用权限错误不证明目标论坛不可读。读权限不代表有目标论坛的写权限。
 - `data` 只写 reference 列出的字段;`developer_id` / `app_id` 用 scope 参数,不要重复写进 `data`。
 - `order` 与 `moment_intent` 是枚举:非法值会被直接拒绝,不会静默降级。
 - 写能力:`+upload-image`、`+upload-video`、发帖与回帖都需要论坛版主/主管理员权限;缺权限按共享错误约定解释,不要改用素材库上传或其它接口绕过。
@@ -72,7 +84,7 @@ call_tool(name:"community-management get-community-moment", args:{
 
 | Reference | 什么时候读 | 读取方式 |
 | --- | --- | --- |
-| read moments | 读帖子:列表与排序、子版块、意图筛选、正文与图片字段 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-community-management/references/read-moments.md"})` |
+| read moments | 读帖子:调用 scope 与跨论坛查询、权限排查、子版块、正文与图片字段 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-community-management/references/read-moments.md"})` |
 | read replies | 读回复:一级回复、子回复、置顶回复,以及 `stat` / `total` 口径 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-community-management/references/read-replies.md"})` |
 | upload image | 帖子配图:权限、产物、与素材库的区别 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-community-management/references/upload-image.md"})` |
 | upload video | 帖子视频:登记、`videoId`、状态与重试 | `ghost_manual({ghost_id:"taptap-cli", path:"taptap-suite/references/taptap-community-management/references/upload-video.md"})` |
